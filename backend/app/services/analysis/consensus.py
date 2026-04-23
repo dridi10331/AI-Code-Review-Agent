@@ -31,7 +31,12 @@ def aggregate_findings(model_results: list[ModelReview]) -> list[Finding]:
                     "medium",
                 ):
                     deduplicated[key] = finding
-    return list(deduplicated.values())
+    severity_rank = {"critical": 3, "high": 2, "medium": 1, "low": 0}
+    return sorted(
+        deduplicated.values(),
+        key=lambda f: (severity_rank.get(f.severity, 1), f.category, f.title.lower()),
+        reverse=True,
+    )
 
 
 def compute_consensus_score(model_results: list[ModelReview], findings: list[Finding]) -> float:
