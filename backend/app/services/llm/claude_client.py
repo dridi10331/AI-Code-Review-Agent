@@ -36,6 +36,7 @@ class ClaudeReviewer(BaseReviewer):
                 model=self.model_name,
                 max_tokens=1200,
                 temperature=0.1,
+                system="Return valid JSON only. Do not wrap in markdown. Follow the JSON contract exactly.",
                 messages=[
                     {
                         "role": "user",

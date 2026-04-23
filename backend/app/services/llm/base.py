@@ -4,8 +4,14 @@ from abc import ABC, abstractmethod
 from typing import Any
 
 from backend.app.models.review import Finding, ModelReview, ReviewerRole
+from pydantic import BaseModel, Field, ValidationError
 
 logger = logging.getLogger(__name__)
+
+class LlmReviewPayload(BaseModel):
+    summary: str = Field(default="No summary returned.")
+    score: float = Field(default=5.0, ge=0.0, le=10.0)
+    findings: list[Finding] = Field(default_factory=list)
 
 
 class BaseReviewer(ABC):
@@ -58,40 +64,33 @@ def parse_model_response(
             raw_response={"raw_text": text[:1500]},
         )
 
-    raw_findings = payload.get("findings", [])
-    findings: list[Finding] = []
-    for item in raw_findings:
-        if not isinstance(item, dict):
-            continue
-        try:
-            findings.append(
-                Finding(
-                    category=item.get("category", "maintainability"),
-                    severity=item.get("severity", "medium"),
-                    title=item.get("title", "Untitled finding"),
-                    description=item.get("description", "No description provided."),
-                    line_start=item.get("line_start"),
-                    line_end=item.get("line_end"),
-                    recommendation=item.get("recommendation"),
-                )
-            )
-        except Exception as exc:
-            logger.debug("Skipping malformed finding: %s", exc)
-
-    summary = payload.get("summary", "No summary returned.")
-    score = payload.get("score", fallback_score)
-
     try:
-        score_float = max(0.0, min(10.0, float(score)))
-    except (TypeError, ValueError):
-        score_float = fallback_score
+        normalized = LlmReviewPayload.model_validate(
+            {
+                "summary": payload.get("summary", "No summary returned."),
+                "score": payload.get("score", fallback_score),
+                "findings": payload.get("findings", []),
+            }
+        )
+    except ValidationError as exc:
+        logger.debug("Invalid model payload: %s", exc)
+        return ModelReview(
+            model_name=model_name,
+            role=role,
+            summary=str(payload.get("summary") or text[:300] or "Model returned invalid JSON payload."),
+            findings=[],
+            score=fallback_score,
+            success=False,
+            error="invalid_payload_schema",
+            raw_response={"payload": payload, "validation_error": exc.errors()},
+        )
 
     return ModelReview(
         model_name=model_name,
         role=role,
-        summary=summary,
-        findings=findings,
-        score=score_float,
+        summary=normalized.summary,
+        findings=normalized.findings,
+        score=normalized.score,
         success=True,
         raw_response=payload,
     )

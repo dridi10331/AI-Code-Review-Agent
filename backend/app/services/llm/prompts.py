@@ -1,7 +1,7 @@
 from langchain_core.prompts import PromptTemplate
 
 from backend.app.models.review import ReviewRequest
-from backend.app.services.analysis.diff_parser import summarize_diff
+from backend.app.services.analysis.diff_parser import build_diff_review_context, summarize_diff
 
 JSON_CONTRACT = """
 Return strict JSON with this structure:
@@ -30,6 +30,13 @@ Language: {language}
 Requested Focus Areas: {focus}
 Diff Summary:
 {diff_summary}
+Diff Context:
+{diff_context}
+
+Instructions:
+- If a diff is provided, prioritize findings in the changed hunks and their immediate surrounding logic.
+- When you can, set line_start/line_end to the approximate new-file line numbers mentioned in the diff context.
+- Return JSON only. No markdown, no prose outside JSON.
 
 Code:
 {code}
@@ -46,6 +53,13 @@ auth mistakes, and injection vectors.
 Language: {language}
 Diff Summary:
 {diff_summary}
+Diff Context:
+{diff_context}
+
+Instructions:
+- If a diff is provided, focus on vulnerabilities introduced/modified by the diff first.
+- Prefer concrete exploit scenarios and specific fixes.
+- Return JSON only. No markdown, no prose outside JSON.
 
 Code:
 {code}
@@ -61,6 +75,12 @@ Focus on algorithmic complexity, memory pressure, repeated I/O, and async misuse
 Language: {language}
 Diff Summary:
 {diff_summary}
+Diff Context:
+{diff_context}
+
+Instructions:
+- If a diff is provided, focus on performance regressions in changed hunks first.
+- Return JSON only. No markdown, no prose outside JSON.
 
 Code:
 {code}
@@ -75,6 +95,7 @@ def build_primary_prompt(request: ReviewRequest) -> str:
         language=request.language,
         focus=", ".join(request.focus) if request.focus else "general review",
         diff_summary=summarize_diff(request.diff or ""),
+        diff_context=build_diff_review_context(request.diff or ""),
         code=request.code,
         json_contract=JSON_CONTRACT,
     )
@@ -84,6 +105,7 @@ def build_security_prompt(request: ReviewRequest) -> str:
     return SECURITY_TEMPLATE.format(
         language=request.language,
         diff_summary=summarize_diff(request.diff or ""),
+        diff_context=build_diff_review_context(request.diff or ""),
         code=request.code,
         json_contract=JSON_CONTRACT,
     )
@@ -93,6 +115,7 @@ def build_performance_prompt(request: ReviewRequest) -> str:
     return PERFORMANCE_TEMPLATE.format(
         language=request.language,
         diff_summary=summarize_diff(request.diff or ""),
+        diff_context=build_diff_review_context(request.diff or ""),
         code=request.code,
         json_contract=JSON_CONTRACT,
     )
