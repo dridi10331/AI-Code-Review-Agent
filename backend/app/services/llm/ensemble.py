@@ -7,6 +7,7 @@ from backend.app.services.analysis.consensus import (
     compute_consensus_score,
 )
 from backend.app.services.llm.circuit_breaker import CircuitBreaker
+from backend.app.services.llm.ollama_client import OllamaReviewer
 from backend.app.services.llm.prompts import (
     build_performance_prompt,
     build_primary_prompt,
@@ -17,27 +18,31 @@ from backend.app.services.llm.prompts import (
 class MultiModelEnsemble:
     def __init__(
         self,
-        claude_reviewer,  # Can be ClaudeReviewer or OllamaReviewer
-        openai_reviewer,  # Can be OpenAIReviewer or OllamaReviewer
-        heuristic_reviewer,  # Can be HeuristicReviewer or OllamaReviewer
+        claude_reviewer,
+        openai_reviewer,
+        heuristic_reviewer,
         circuit_breaker: CircuitBreaker,
+        ollama_mode: bool = False,
     ) -> None:
         self._claude_reviewer = claude_reviewer
         self._openai_reviewer = openai_reviewer
         self._heuristic_reviewer = heuristic_reviewer
         self._circuit_breaker = circuit_breaker
+        # Sequential mode: Ollama can only handle one request at a time
+        self._ollama_mode = ollama_mode
 
     async def review(self, request: ReviewRequest) -> dict:
         primary_prompt = build_primary_prompt(request)
         security_prompt = build_security_prompt(request)
 
-        primary_task = self._run_primary_with_fallback(primary_prompt)
-        secondary_task = self._run_secondary(security_prompt)
-        tertiary_task = self._heuristic_reviewer.review(request.code, role="tertiary")
+        if self._ollama_mode:
+            # Sequential execution — Ollama queues one request at a time
+            model_results = await self._review_sequential(primary_prompt, security_prompt, request)
+        else:
+            # Parallel execution — for paid APIs (Claude + OpenAI)
+            model_results = await self._review_parallel(primary_prompt, security_prompt, request)
 
-        model_results = await asyncio.gather(primary_task, secondary_task, tertiary_task)
-        model_results = [result for result in model_results if isinstance(result, ModelReview)]
-
+        model_results = [r for r in model_results if isinstance(r, ModelReview)]
         findings = aggregate_findings(model_results)
         consensus_score = compute_consensus_score(model_results, findings)
         summary = build_summary(findings)
@@ -52,11 +57,39 @@ class MultiModelEnsemble:
             "performance_prompt_used": build_performance_prompt(request),
         }
 
+    async def _review_sequential(
+        self, primary_prompt: str, security_prompt: str, request: ReviewRequest
+    ) -> list[ModelReview]:
+        """Run models one at a time — required for Ollama which is single-threaded."""
+        results: list[ModelReview] = []
+
+        # Primary review
+        primary = await self._claude_reviewer.review(primary_prompt, role="primary")
+        results.append(primary)
+
+        # Secondary review (security-focused) — only if primary succeeded or we still want coverage
+        secondary = await self._openai_reviewer.review(security_prompt, role="secondary")
+        results.append(secondary)
+
+        # Tertiary review (performance/heuristic)
+        tertiary = await self._heuristic_reviewer.review(request.code, role="tertiary")
+        results.append(tertiary)
+
+        return results
+
+    async def _review_parallel(
+        self, primary_prompt: str, security_prompt: str, request: ReviewRequest
+    ) -> list[ModelReview]:
+        """Run all models in parallel — for paid APIs."""
+        primary_task = self._run_primary_with_fallback(primary_prompt)
+        secondary_task = self._run_secondary(security_prompt)
+        tertiary_task = self._heuristic_reviewer.review(request.code, role="tertiary")
+        return list(await asyncio.gather(primary_task, secondary_task, tertiary_task))
+
     async def _run_primary_with_fallback(self, prompt: str) -> ModelReview:
         primary = await self._claude_reviewer.review(prompt, role="primary")
         if primary.success:
             return primary
-
         fallback = await self._run_openai_with_circuit(prompt, role="fallback")
         if fallback.success:
             fallback.summary = f"Primary model unavailable. Fallback result: {fallback.summary}"
@@ -70,13 +103,12 @@ class MultiModelEnsemble:
             return ModelReview(
                 model_name=self._openai_reviewer.model_name,
                 role=role,
-                summary="OpenAI reviewer skipped because circuit breaker is open.",
+                summary="Reviewer skipped: circuit breaker open.",
                 findings=[],
                 score=0.0,
                 success=False,
                 error="circuit_breaker_open",
             )
-
         result = await self._openai_reviewer.review(prompt, role=role)
         if result.success:
             self._circuit_breaker.record_success()
@@ -105,10 +137,6 @@ class MultiModelEnsemble:
                 tests.append("Add micro-benchmark or load test for hot paths.")
             if finding.category == "correctness":
                 tests.append("Add regression tests that reproduce the identified edge case.")
-
         if not tests:
             tests.append("Add baseline unit tests for core business logic and edge inputs.")
-
-        # Preserve order while deduplicating.
-        unique_tests = list(dict.fromkeys(tests))
-        return unique_tests[:8]
+        return list(dict.fromkeys(tests))[:8]
