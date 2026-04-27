@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Code Review Report - {{ response.review_id }}</title>
+  <style>
+    :root {
+      --bg: #f6f8fb;
+      --text: #14213d;
+      --muted: #4f5d75;
+      --card: #ffffff;
+      --accent: #0f766e;
+      --critical: #b91c1c;
+      --high: #dc2626;
+      --medium: #ea580c;
+      --low: #15803d;
+    }
+    body {
+      margin: 0;
+      padding: 2rem;
+      background: radial-gradient(circle at 10% 10%, #dbeafe, transparent 35%), var(--bg);
+      color: var(--text);
+      font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+    }
+    .container {
+      max-width: 1000px;
+      margin: 0 auto;
+      display: grid;
+      gap: 1rem;
+    }
+    .card {
+      background: var(--card);
+      border-radius: 14px;
+      padding: 1.1rem 1.2rem;
+      box-shadow: 0 8px 24px rgba(20, 33, 61, 0.08);
+      border: 1px solid rgba(15, 118, 110, 0.15);
+    }
+    h1, h2 {
+      margin-top: 0;
+    }
+    .meta {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 0.5rem;
+      font-size: 0.95rem;
+      color: var(--muted);
+    }
+    .badge {
+      display: inline-block;
+      border-radius: 999px;
+      padding: 0.2rem 0.55rem;
+      font-size: 0.82rem;
+      margin-left: 0.5rem;
+      color: #fff;
+    }
+    .sev-critical { background: var(--critical); }
+    .sev-high { background: var(--high); }
+    .sev-medium { background: var(--medium); }
+    .sev-low { background: var(--low); }
+    .finding {
+      border-left: 4px solid var(--accent);
+      margin-bottom: 0.8rem;
+      padding-left: 0.7rem;
+    }
+    ul {
+      padding-left: 1.2rem;
+    }
+    code {
+      background: #eef2ff;
+      padding: 0.15rem 0.35rem;
+      border-radius: 6px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <section class="card">
+      <h1>AI Code Review Report</h1>
+      <div class="meta">
+        <div><strong>Review ID:</strong> {{ response.review_id }}</div>
+        <div><strong>User:</strong> {{ response.user_id }}</div>
+        <div><strong>Repository:</strong> {{ response.repository or "n/a" }}</div>
+        <div><strong>File:</strong> {{ response.file_path or "n/a" }}</div>
+        <div><strong>Language:</strong> {{ response.language }}</div>
+        <div><strong>Consensus Score:</strong> {{ response.consensus_score }}/10</div>
+        <div><strong>Cache Hit:</strong> {{ "yes" if response.cache_hit else "no" }}</div>
+        <div><strong>Processing:</strong> {{ response.processing_ms }} ms</div>
+      </div>
+      <p>{{ response.summary }}</p>
+    </section>
+
+    <section class="card">
+      <h2>Findings ({{ response.findings | length }})</h2>
+      {% if response.findings %}
+        {% for finding in response.findings %}
+          <article class="finding">
+            <h3>
+              {{ finding.title }}
+              <span class="badge sev-{{ finding.severity }}">{{ finding.severity }}</span>
+            </h3>
+            <p><strong>Category:</strong> {{ finding.category }}</p>
+            <p>{{ finding.description }}</p>
+            {% if finding.line_start %}
+              <p><strong>Lines:</strong> {{ finding.line_start }}{% if finding.line_end %}-{{ finding.line_end }}{% endif %}</p>
+            {% endif %}
+            {% if finding.recommendation %}
+              <p><strong>Recommendation:</strong> {{ finding.recommendation }}</p>
+            {% endif %}
+          </article>
+        {% endfor %}
+      {% else %}
+        <p>No findings detected.</p>
+      {% endif %}
+    </section>
+
+    <section class="card">
+      <h2>Refactoring Suggestions</h2>
+      <ul>
+        {% for suggestion in response.refactoring_suggestions %}
+          <li>{{ suggestion }}</li>
+        {% endfor %}
+      </ul>
+    </section>
+
+    <section class="card">
+      <h2>Test Recommendations</h2>
+      <ul>
+        {% for recommendation in response.test_recommendations %}
+          <li>{{ recommendation }}</li>
+        {% endfor %}
+      </ul>
+    </section>
+
+    <section class="card">
+      <h2>Model Outputs</h2>
+      {% for model in response.model_results %}
+        <div class="finding">
+          <p><strong>{{ model.role }}</strong>: {{ model.model_name }}</p>
+          <p><strong>Score:</strong> {{ model.score }}</p>
+          <p>{{ model.summary }}</p>
+          {% if model.error %}
+            <p><strong>Error:</strong> <code>{{ model.error }}</code></p>
+          {% endif %}
+        </div>
+      {% endfor %}
+    </section>
+  </div>
+</body>
+</html>
