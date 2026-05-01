@@ -1,12 +1,16 @@
 from contextlib import asynccontextmanager, suppress
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import ValidationError
 from redis.asyncio import Redis
 
 from backend.app.api.router import api_router
 from backend.app.core.config import get_settings
 from backend.app.core.container import ServiceContainer
+from backend.app.core.exception_handlers import generic_exception_handler, pydantic_exception_handler, value_error_handler
 from backend.app.core.logging import setup_logging
+from backend.app.core.request_id_middleware import RequestIDMiddleware
 from backend.app.core.telemetry import setup_telemetry, shutdown_telemetry
 from backend.app.db.init_db import init_models
 from backend.app.db.repository import ReviewRepository
@@ -121,6 +125,37 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title=settings.app_name, version="0.1.0", lifespan=lifespan)
+
+# Add request ID middleware for tracing (before CORS)
+app.add_middleware(RequestIDMiddleware)
+
+# Configure CORS for security
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000", "http://localhost:8501"] if settings.environment == "dev" else [],
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Content-Type", "Authorization", "X-API-Key"],
+    max_age=600,  # 10 minutes
+)
+
+# Add security headers middleware
+@app.middleware("http")
+async def add_security_headers(request, call_next):
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["X-XSS-Protection"] = "1; mode=block"
+    response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    response.headers["Content-Security-Policy"] = "default-src 'self'"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    return response
+
+# Register exception handlers
+app.add_exception_handler(ValidationError, pydantic_exception_handler)
+app.add_exception_handler(ValueError, value_error_handler)
+app.add_exception_handler(Exception, generic_exception_handler)
+
 setup_telemetry(app, settings)
 app.include_router(api_router, prefix=settings.api_v1_prefix)
 

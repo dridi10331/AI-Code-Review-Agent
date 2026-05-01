@@ -17,23 +17,37 @@ class ReviewRepository:
         response: ReviewResponse,
         code_hash: str,
     ) -> None:
+        """Store review results in database.
+        
+        Args:
+            request: Original review request
+            response: Generated review response
+            code_hash: Hash of the reviewed code for deduplication
+            
+        Raises:
+            Exception: If database write fails (caller should handle)
+        """
         async with self._session_factory() as session:
-            record = ReviewRecord(
-                id=response.review_id,
-                user_id=request.user_id,
-                repository=request.repository,
-                file_path=request.file_path,
-                language=request.language,
-                code_hash=code_hash,
-                summary=response.summary,
-                overall_score=response.consensus_score,
-                cache_hit=response.cache_hit,
-                models_used=[item.model_dump() for item in response.model_results],
-                request_payload=request.model_dump(),
-                response_payload=response.model_dump(),
-            )
-            session.add(record)
-            await session.commit()
+            try:
+                record = ReviewRecord(
+                    id=response.review_id,
+                    user_id=request.user_id,
+                    repository=request.repository,
+                    file_path=request.file_path,
+                    language=request.language,
+                    code_hash=code_hash,
+                    summary=response.summary,
+                    overall_score=response.consensus_score,
+                    cache_hit=response.cache_hit,
+                    models_used=[item.model_dump() for item in response.model_results],
+                    request_payload=request.model_dump(),
+                    response_payload=response.model_dump(),
+                )
+                session.add(record)
+                await session.commit()
+            except Exception as exc:
+                await session.rollback()
+                raise RuntimeError(f"Failed to persist review: {exc}") from exc
 
     async def get_review(self, review_id: str) -> dict[str, Any] | None:
         async with self._session_factory() as session:

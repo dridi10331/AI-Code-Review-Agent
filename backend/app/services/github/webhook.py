@@ -7,10 +7,32 @@ from backend.app.services.github.client import GitHubApiClient
 
 
 def verify_github_signature(payload: bytes, signature_header: str | None, secret: str) -> bool:
-    if not signature_header or not signature_header.startswith("sha256="):
+    """Verify GitHub webhook signature using timing-safe comparison.
+    
+    Args:
+        payload: The raw request body as bytes
+        signature_header: The X-Hub-Signature-256 header value
+        secret: The webhook secret key
+        
+    Returns:
+        True if signature is valid, False otherwise
+        
+    Note:
+        Uses hmac.compare_digest for timing-safe comparison to prevent timing attacks
+    """
+    if not signature_header:
         return False
-
+    
+    if not isinstance(signature_header, str) or not signature_header.startswith("sha256="):
+        return False
+    
+    if not secret:
+        return False
+    
+    # Compute expected signature
     expected = "sha256=" + hmac.new(secret.encode("utf-8"), payload, hashlib.sha256).hexdigest()
+    
+    # Use timing-safe comparison to prevent timing attacks
     return hmac.compare_digest(expected, signature_header)
 
 

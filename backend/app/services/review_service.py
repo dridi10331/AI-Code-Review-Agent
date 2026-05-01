@@ -129,9 +129,29 @@ class ReviewService:
         limit: int,
         offset: int,
     ) -> list[ReviewHistoryItem]:
+        """Get review history with proper error handling.
+        
+        Args:
+            user_id: Optional user filter
+            limit: Number of records to return
+            offset: Number of records to skip
+            
+        Returns:
+            List of history items or empty list if database unavailable
+            
+        Raises:
+            ValueError: If limit or offset are invalid
+        """
+        if limit <= 0 or limit > 200:
+            raise ValueError("Limit must be between 1 and 200")
+        if offset < 0:
+            raise ValueError("Offset must be non-negative")
+            
         try:
             return await self._repository.list_history(user_id=user_id, limit=limit, offset=offset)
-        except Exception:
-            # Database connection failed (e.g., asyncpg on Windows)
-            # Return empty list instead of crashing
+        except Exception as exc:
+            # Log the error for debugging, but return empty list for graceful degradation
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(f"Database query failed for history: {exc}")
             return []

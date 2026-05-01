@@ -66,7 +66,32 @@ async def get_review_history(
 async def get_review(
     review_id: str,
     container: Annotated[ServiceContainer, Depends(get_container)],
+    auth: Annotated[AuthContext, Depends(require_auth)],
 ) -> ReviewResponse:
+    """Get a specific review by ID with rate limiting.
+    
+    Args:
+        review_id: The review identifier
+        container: Service container
+        auth: Authentication context
+        
+    Returns:
+        ReviewResponse: The stored review result
+        
+    Raises:
+        HTTPException: If review not found (404) or rate limited (429)
+    """
+    # Validate review_id format (should be UUID-like)
+    if not review_id or len(review_id) > 100:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid review_id format.",
+        )
+    
+    # Apply rate limiting even on GET requests
+    user_id = auth.subject if auth.auth_type != "none" else "anonymous"
+    await container.rate_limiter.enforce(user_id)
+    
     record = await container.review_service.get_review(review_id)
     if not record:
         raise HTTPException(

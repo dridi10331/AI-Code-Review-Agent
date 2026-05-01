@@ -5,9 +5,27 @@ _session_factory_cache: dict[str, async_sessionmaker[AsyncSession]] = {}
 
 
 def get_engine(database_url: str):
+    """Create or retrieve cached async engine with optimal connection pooling settings.
+    
+    Args:
+        database_url: SQLAlchemy async database URL
+        
+    Returns:
+        Configured async engine with connection pooling
+    """
     engine = _engine_cache.get(database_url)
     if engine is None:
-        engine = create_async_engine(database_url, pool_pre_ping=True)
+        # pool_pre_ping: Test connections before using them (detects stale connections)
+        # pool_size: Number of connections to maintain (default: 5)
+        # max_overflow: Additional connections allowed when pool exhausted (default: 10)
+        # echo_pool: Log pool checkout/checkin events for debugging (set to True if needed)
+        engine = create_async_engine(
+            database_url,
+            pool_pre_ping=True,
+            pool_size=20,
+            max_overflow=30,
+            echo=False,
+        )
         _engine_cache[database_url] = engine
     return engine
 
